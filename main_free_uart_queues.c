@@ -62,19 +62,13 @@ static char uartMemoryAreaRx_[uartAreaMemorySize_];
 
 // structure containing parameters passed to TaskPeriodic function
 typedef struct{
-    HalUartCoreStateHandle * handle;          // pointer to handle core initialization
-    char echoBuffer_[echoBufferSize_ + 1];  // string to be send via UART Tx
-    int tpDelay;                        // task delay after send
-//    xSemaphoreHandle tpMutex;           // mutex handle
-//    QueueHandle_t tpSwitchQueue;        // queue handle
+    HalUartCoreStateHandle * handle;        // pointer to handle core initialization
+    QueueHandle_t MessageQueue;             // queue handle
 } TPParams_;
 
 
-QueueHandle_t myMessageQueue;
-
 static TaskHandle_t xHandlingButtons = NULL;
 static TaskHandle_t xHandlingReceive = NULL;
-static TaskHandle_t xHandlingTransmit = NULL;
 
 /* ISR for the 2 buttons on evaluation board */
 void INT_Handler_Port_J(void)
@@ -126,18 +120,17 @@ int main(void) {
                                                     uartAreaMemorySize_);
 
     TPprint1.handle = &handle;
-
-    myMessageQueue = xQueueCreate(echoBufferSize_, sizeof(char));
+    TPprint1.MessageQueue = xQueueCreate(echoBufferSize_, sizeof(char));
 
     for(sentBytesCount = 0; sentBytesCount < strlen(greetingMessage_); sentBytesCount++)             // send greetingMessage via queue to taskTransmit
     {
-        xQueueSendToBack( myMessageQueue, &greetingMessage_[sentBytesCount], 0 );
+        xQueueSendToBack( TPprint1.MessageQueue, &greetingMessage_[sentBytesCount], 0 );
     }
 
 
     xTaskCreate(taskButtonPressed, "taskButtonPressed", 200, NULL, tskIDLE_PRIORITY + 1, &xHandlingButtons);
     xTaskCreate(taskReceive,  "receive",  200, (void *)& TPprint1, tskIDLE_PRIORITY+2, &xHandlingReceive);
-    xTaskCreate(taskTransmit, "transmit", 200, (void *)& TPprint1, tskIDLE_PRIORITY+1, &xHandlingTransmit);
+    xTaskCreate(taskTransmit, "transmit", 200, (void *)& TPprint1, tskIDLE_PRIORITY+1, NULL);
 
     // start FreeRTOS scheduler
     vTaskStartScheduler();
@@ -155,8 +148,8 @@ void taskReceive(void * taskParameters)
 
     // parameter variable cast
     TPParams_ const * const taskParametersCast = (TPParams_ *)taskParameters;
-
     HalUartCoreStateHandle handle = *taskParametersCast->handle;
+    QueueHandle_t const MessageQueue = taskParametersCast->MessageQueue;
 
     while(1)
     {
@@ -180,7 +173,7 @@ void taskReceive(void * taskParameters)
         }
         for(lv = 0; lv < receivedBytesCount; lv++)             // send received data via queue to taskTransmit
         {
-            xQueueSendToBack( myMessageQueue, &receiveBuffer[lv], 0 );
+            xQueueSendToBack( MessageQueue, &receiveBuffer[lv], 0 );
         }
     }
 }
@@ -192,13 +185,13 @@ void taskTransmit(void * taskParameters)
     char lReceivedValue;
     // parameter variable cast
     TPParams_ const * const taskParametersCast = (TPParams_ *)taskParameters;
+    QueueHandle_t const MessageQueue = taskParametersCast->MessageQueue;
 
     HalUartCoreStateHandle handle = *taskParametersCast->handle;
 
     while(1)
     {
-//        ulNotificationValue = ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
-        while (xQueueReceive( myMessageQueue, &lReceivedValue, portMAX_DELAY ) != 0)
+        while (xQueueReceive( MessageQueue, &lReceivedValue, portMAX_DELAY ) != 0)
         {
             halUartTx(&lReceivedValue, 1, handle);
         }
